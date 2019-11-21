@@ -1,0 +1,776 @@
+﻿using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Text;
+
+namespace FlexBuffers
+{
+    public class FlexBuffer
+    {
+        [Flags]
+        public enum Options: byte
+        {
+            None = 0,
+            ShareKeys = 1,
+            ShareStrings = 1 << 1,
+            ShareKeyVectors = 1 << 2,
+        } 
+        private readonly List<StackValue> _stack = new List<StackValue>();
+        private readonly Dictionary<string, int> _stringCache = new Dictionary<string, int>();
+        private readonly Dictionary<string, int> _keyCache = new Dictionary<string, int>();
+        private readonly Dictionary<long[], StackValue> _keyVectorCache = new Dictionary<long[], StackValue>(new OffsetArrayComparer());
+        private byte[] _bytes;
+        private int _size = 2048;
+        private int _offset;
+        private readonly Options _options;
+        private bool _finished = false;
+
+        public FlexBuffer(int size = 2048, Options options = Options.ShareKeys | Options.ShareStrings | Options.ShareKeyVectors)
+        {
+            if (size > 0)
+            {
+                this._size = size;
+            }
+            _bytes = new byte[size];
+            _offset = 0;
+            _options = options;
+        }
+
+        public static byte[] Null()
+        {
+            var buffer = new FlexBuffer(3);
+            buffer.AddNull();
+            return buffer.Finish();
+        }
+        
+        public static byte[] SingleValue(long value)
+        {
+            var buffer = new FlexBuffer(10);
+            buffer.Add(value);
+            return buffer.Finish();
+        }
+        
+        public static byte[] SingleValue(ulong value)
+        {
+            var buffer = new FlexBuffer(10);
+            buffer.Add(value);
+            return buffer.Finish();
+        }
+        
+        public static byte[] SingleValue(double value)
+        {
+            var buffer = new FlexBuffer(10);
+            buffer.Add(value);
+            return buffer.Finish();
+        }
+        
+        public static byte[] SingleValue(bool value)
+        {
+            var buffer = new FlexBuffer(3);
+            buffer.Add(value);
+            return buffer.Finish();
+        }
+        
+        public static byte[] SingleValue(string value)
+        {
+            var buffer = new FlexBuffer(value.Length + 2);
+            buffer.Add(value);
+            return buffer.Finish();
+        }
+        
+        public static byte[] SingleValue(long x, long y)
+        {
+            var buffer = new FlexBuffer(20);
+            var start = buffer.StartVector();
+            buffer.Add(x);
+            buffer.Add(y);
+            buffer.EndVector(start, true, true);
+            return buffer.Finish();
+        }
+        
+        public static byte[] SingleValue(long x, long y, long z)
+        {
+            var buffer = new FlexBuffer(28);
+            var start = buffer.StartVector();
+            buffer.Add(x);
+            buffer.Add(y);
+            buffer.Add(z);
+            buffer.EndVector(start, true, true);
+            return buffer.Finish();
+        }
+        
+        public static byte[] SingleValue(long x, long y, long z, long w)
+        {
+            var buffer = new FlexBuffer(36);
+            var start = buffer.StartVector();
+            buffer.Add(x);
+            buffer.Add(y);
+            buffer.Add(z);
+            buffer.Add(w);
+            buffer.EndVector(start, true, true);
+            return buffer.Finish();
+        }
+        
+        public static byte[] SingleValue(ulong x, ulong y)
+        {
+            var buffer = new FlexBuffer(20);
+            var start = buffer.StartVector();
+            buffer.Add(x);
+            buffer.Add(y);
+            buffer.EndVector(start, true, true);
+            return buffer.Finish();
+        }
+        
+        public static byte[] SingleValue(ulong x, ulong y, ulong z)
+        {
+            var buffer = new FlexBuffer(28);
+            var start = buffer.StartVector();
+            buffer.Add(x);
+            buffer.Add(y);
+            buffer.Add(z);
+            buffer.EndVector(start, true, true);
+            return buffer.Finish();
+        }
+        
+        public static byte[] SingleValue(ulong x, ulong y, ulong z, ulong w)
+        {
+            var buffer = new FlexBuffer(36);
+            var start = buffer.StartVector();
+            buffer.Add(x);
+            buffer.Add(y);
+            buffer.Add(z);
+            buffer.Add(w);
+            buffer.EndVector(start, true, true);
+            return buffer.Finish();
+        }
+        
+        public static byte[] SingleValue(double x, double y)
+        {
+            var buffer = new FlexBuffer(20);
+            var start = buffer.StartVector();
+            buffer.Add(x);
+            buffer.Add(y);
+            buffer.EndVector(start, true, true);
+            return buffer.Finish();
+        }
+        
+        public static byte[] SingleValue(double x, double y, double z)
+        {
+            var buffer = new FlexBuffer(28);
+            var start = buffer.StartVector();
+            buffer.Add(x);
+            buffer.Add(y);
+            buffer.Add(z);
+            buffer.EndVector(start, true, true);
+            return buffer.Finish();
+        }
+        
+        public static byte[] SingleValue(double x, double y, double z, double w)
+        {
+            var buffer = new FlexBuffer(36);
+            var start = buffer.StartVector();
+            buffer.Add(x);
+            buffer.Add(y);
+            buffer.Add(z);
+            buffer.Add(w);
+            buffer.EndVector(start, true, true);
+            return buffer.Finish();
+        }
+        
+        public static byte[] SingleValue(byte[] blob)
+        {
+            var buffer = new FlexBuffer(blob.Length + 10);
+            buffer.Add(blob);
+            return buffer.Finish();
+        }
+
+        public static byte[] From(IEnumerable value, Options options = Options.ShareKeys | Options.ShareStrings | Options.ShareKeyVectors)
+        {
+            var buffer = new FlexBuffer(options:options);
+            if (value is IDictionary dictionary)
+            {
+                buffer.AddDynamicMap(dictionary);
+            }
+            else
+            {
+                buffer.AddDynamicVector(value);    
+            }
+            
+            return buffer.Finish();
+        }
+
+        public byte[] Finish()
+        {
+            if (_finished == false)
+            {
+                FinishBuffer();
+            }
+            var result = new byte[_offset];
+            Buffer.BlockCopy(_bytes, 0, result, 0, _offset);
+            return result;
+        }
+
+        private void FinishBuffer()
+        {
+            if (_finished)
+            {
+                throw  new Exception("FlexBuffer is already finished");
+            }
+
+            if (_stack.Count != 1)
+            {
+                throw new Exception("Stack needs to be exactly 1");
+            }
+
+            var value = _stack[0];
+
+            var byteWidth = Align(value.ElementWidth(_offset, 0));
+            
+            Write(value, byteWidth);
+            Write(value.StoredPackedType());
+            Write(byteWidth);
+            _finished = true;
+        }
+        
+        internal Type AddNull()
+        {
+            _stack.Add(StackValue.Null());
+            return Type.Null;
+        }
+
+        internal Type Add(long value)
+        {
+            _stack.Add(StackValue.Value(value));
+            return Type.Int;
+        }
+        
+        internal Type AddIndirect(long value)
+        {
+            var type = Type.IndirectInt;
+            var bitWidth = BitWidthUtil.Width(value);
+            var byteWidth = Align(bitWidth);
+            var valueOffset = _offset;
+            Write(value, byteWidth);
+            _stack.Add(StackValue.Value(valueOffset, bitWidth, type));
+            return type;
+        }
+
+        internal Type Add(ulong value)
+        {
+            _stack.Add(StackValue.Value(value));
+            return Type.Uint;
+        }
+        
+        internal Type AddIndirect(ulong value)
+        {
+            var type = Type.IndirectUInt;
+            var bitWidth = BitWidthUtil.Width(value);
+            var byteWidth = Align(bitWidth);
+            var valueOffset = _offset;
+            Write(value, byteWidth);
+            _stack.Add(StackValue.Value(valueOffset, bitWidth, type));
+            return type;
+        }
+        
+        internal Type Add(double value)
+        {
+            _stack.Add(StackValue.Value(value));
+            return Type.Float;
+        }
+        
+        internal Type AddIndirect(double value)
+        {
+            var type = Type.IndirectFloat;
+            var bitWidth = BitWidthUtil.Width(value);
+            var byteWidth = Align(bitWidth);
+            var valueOffset = _offset;
+            Write(value, byteWidth);
+            _stack.Add(StackValue.Value(valueOffset, bitWidth, type));
+            return type;
+        }
+        
+        internal Type Add(bool value)
+        {
+            _stack.Add(StackValue.Value(value));
+            return Type.Bool;
+        }
+        
+        internal Type Add(string value)
+        {
+            
+            var bytes = Encoding.UTF8.GetBytes(value);
+            var length = bytes.Length;
+            var bitWidth = BitWidthUtil.Width(length);
+            if (_options.HasFlag(Options.ShareStrings) && _stringCache.ContainsKey(value))
+            {
+                _stack.Add(StackValue.Value(_stringCache[value], bitWidth, Type.String));
+                return Type.String;
+            }
+            var byteWidth = Align(bitWidth);
+            Write(length, byteWidth);
+            var stringOffset = _offset;
+            var newOffset = NewOffset(length + 1);
+            Buffer.BlockCopy(bytes, 0, _bytes, _offset, length);
+            _offset = newOffset;
+            _stack.Add(StackValue.Value(stringOffset, bitWidth, Type.String));
+            if (_options.HasFlag(Options.ShareStrings))
+            {
+                _stringCache[value] = stringOffset;
+            }
+            return Type.String;
+        }
+        
+        internal Type Add(byte[] value)
+        {
+            var bitWidth = BitWidthUtil.Width(value.Length);
+            var byteWidth = Align(bitWidth);
+            Write(value.Length, byteWidth);
+            
+            var newOffset = NewOffset(value.Length);
+            var blobOffset = _offset;
+            Buffer.BlockCopy(value, 0, _bytes, _offset, value.Length);
+            _offset = newOffset;
+            _stack.Add(StackValue.Value(blobOffset, bitWidth, Type.Blob));
+            return Type.Blob;
+        }
+
+        private void AddDynamicVector(IEnumerable values)
+        {
+            var start = StartVector();
+            var typed = true;
+            var prevType = -1;
+            foreach (dynamic value in values)
+            {
+                var currentType = this.AddDynamic(value);
+
+                if (typed == false || TypesUtil.IsTypedVectorElement(currentType) == false)
+                {
+                    typed = false;
+                    continue;
+                }
+
+                if (prevType == -1)
+                {
+                    prevType = (int)currentType;
+                }
+
+                if (typed)
+                {
+                    typed = prevType == (int)currentType;
+                }
+            }
+            EndVector(start, typed, false);
+        }
+        
+        private void AddDynamicMap(IDictionary values)
+        {
+            var start = StartVector();
+            var keyStrings = new List<string>(values.Count);
+            foreach (var key in values.Keys)
+            {
+                if (key is string s)
+                {
+                    keyStrings.Add(s);
+                }
+                else
+                {
+                    throw new Exception($"Key {key} is not a string.");
+                }
+            }
+            
+            keyStrings.Sort();
+
+            foreach (var key in keyStrings)
+            {
+                AddKey(key);
+                AddDynamic(values[key]);
+            }
+
+            EndMap(start);
+        }
+
+        internal void SortAndEndMap(int start)
+        {
+            if (((_stack.Count - start) & 1) == 1)
+            {
+                throw new Exception("The stack needs to hold key value pairs (even number of elements)");
+            }
+
+            var sorted = true;
+            for (var i = start; i < _stack.Count - 2; i+=2)
+            {
+                if (ShouldFlip(_stack[i], _stack[i + 2]))
+                {
+                    sorted = false;
+                    break;
+                }
+            }
+
+            if (sorted == false)
+            {
+                for (var i = start; i < _stack.Count; i += 2)
+                {
+                    var flipIndex = i;
+                    for (var j = i + 2; j < _stack.Count; j += 2)
+                    {
+                        if (ShouldFlip(_stack[flipIndex], _stack[j]))
+                        {
+                            flipIndex = j;
+                        }
+                    }
+
+                    if (flipIndex != i)
+                    {
+                        var k = _stack[flipIndex];
+                        var v = _stack[flipIndex + 1];
+                        _stack[flipIndex] = _stack[i];
+                        _stack[flipIndex + 1] = _stack[i + 1];
+                        _stack[i] = k;
+                        _stack[i + 1] = v;
+                        
+                    }
+                }
+            }
+
+            EndMap(start);
+        }
+
+        private void EndMap(int start)
+        {
+            var vecLen = (_stack.Count - start) / 2;
+            StackValue keys;
+            if (_options.HasFlag(Options.ShareKeyVectors))
+            {
+                var offsets = new long[vecLen];
+                for (var i = start; i < _stack.Count; i += 2)
+                {
+                    offsets[(i - start) / 2] = _stack[i].AsLong;
+                }
+
+                if (_keyVectorCache.ContainsKey(offsets))
+                {
+                    keys = _keyVectorCache[offsets];
+                }
+                else
+                {
+                    keys = CreateVector(start, vecLen, 2, true, false);
+                    _keyVectorCache[offsets] = keys;
+                }
+            }
+            else
+            {
+                keys = CreateVector(start, vecLen, 2, true, false);
+            }
+
+            var vec = CreateVector(start + 1, vecLen, 2, false, false, keys);
+            _stack.RemoveRange(_stack.Count - vecLen * 2, vecLen * 2);
+            _stack.Add(vec);
+        }
+
+        private bool ShouldFlip(StackValue v1, StackValue v2)
+        {
+            if (v1.TypeOfValue != Type.Key || v2.TypeOfValue != Type.Key)
+            {
+                throw new Exception($"Stack values are not keys {v1} | {v2}");
+            }
+
+            byte c1, c2;
+            var index = 0;
+            do
+            {
+                c1 = _bytes[v1.AsLong + index];
+                c2 = _bytes[v2.AsLong + index];
+                if (c2 < c1)
+                {
+                    return true;
+                }
+
+                if (c1 < c2)
+                {
+                    return false;
+                }
+
+                index++;
+            } while (c1 != 0 && c2 != 0);
+
+            return false;
+        }
+
+        private Type AddDynamic(dynamic value)
+        {
+            switch (value)
+            {
+                case null:
+                    return AddNull();
+                case string s1:
+                    return Add(s1);
+                case bool b1:
+                    return Add(b1);
+                case sbyte i1:
+                    return Add(i1);
+                case short i1:
+                    return Add(i1);
+                case int i1:
+                    return Add(i1);
+                case long i1:
+                    return Add(i1);
+                case byte l1:
+                    return Add(l1);
+                case ushort l1:
+                    return Add(l1);
+                case uint l1:
+                    return Add(l1);
+                case ulong l1:
+                    return Add(l1);
+                case double d1:
+                    return Add(d1);
+                case IDictionary d:
+                    AddDynamicMap(d);
+                    return Type.Map;
+                case IEnumerable l:
+                    AddDynamicVector(l);
+                    return Type.Vector;
+                default:
+                    throw new Exception($"Unexpected type of {value}");
+            }
+        }
+        
+        internal void AddKey(string value)
+        {
+            if (_options.HasFlag(Options.ShareKeys) && _keyCache.ContainsKey(value))
+            {
+                _stack.Add(StackValue.Value(_keyCache[value], BitWidth.Width8, Type.Key));
+                return;
+            }
+            var bytes = Encoding.UTF8.GetBytes(value);
+            var length = bytes.Length;
+            var keyOffset = _offset;
+            var newOffset = NewOffset(length + 1);
+            Buffer.BlockCopy(bytes, 0, _bytes, _offset, length);
+            _offset = newOffset;
+            _stack.Add(StackValue.Value(keyOffset, BitWidth.Width8, Type.Key));
+            if (_options.HasFlag(Options.ShareKeys))
+            {
+                _keyCache[value] = keyOffset;
+            }
+        }
+
+        private byte Align(BitWidth width)
+        {
+            var byteWidth = 1 << (int) width;
+            _offset += BitWidthUtil.PaddingSize(_offset, byteWidth);
+            return (byte) byteWidth;
+        }
+        
+        private void Write(StackValue value, int width)
+        {
+            var newOffset = NewOffset(width);
+            if (value.IsOffset)
+            {
+                var relOffset = _offset - value.AsLong;
+                if (width == 8 || relOffset < (long)1 << (width * 8))
+                {
+                    Write(relOffset, width);
+                }
+                else
+                {
+                    throw new Exception("Unexpected size");
+                }
+            }
+            else
+            {
+                var bytes = value.IsFloat32 && width == 4 ? BitConverter.GetBytes((float)value.AsDouble) : BitConverter.GetBytes(value.AsULong);
+                var count = Math.Min(bytes.Length, width); 
+                Buffer.BlockCopy(bytes, 0, _bytes, _offset, count);
+            }
+            _offset = newOffset;
+        }
+        
+        private void Write(byte value)
+        {
+            var newOffset = NewOffset(1);
+            _bytes[_offset] = value;
+            _offset = newOffset;
+        }
+        
+        private void Write(long value, int width)
+        {
+            var newOffset = NewOffset(width);
+            var bytes = BitConverter.GetBytes(value);
+            var count = Math.Min(bytes.Length, width); 
+            Buffer.BlockCopy(bytes, 0, _bytes, _offset, count);
+            _offset = newOffset;
+        }
+        
+        private void Write(ulong value, int width)
+        {
+            var newOffset = NewOffset(width);
+            var bytes = BitConverter.GetBytes(value);
+            var count = Math.Min(bytes.Length, width); 
+            Buffer.BlockCopy(bytes, 0, _bytes, _offset, count);
+            _offset = newOffset;
+        }
+        
+        private void Write(double value, int width)
+        {
+            var newOffset = NewOffset(width);
+            var bytes = BitConverter.GetBytes(value);
+            var count = Math.Min(bytes.Length, width); 
+            Buffer.BlockCopy(bytes, 0, _bytes, _offset, count);
+            _offset = newOffset;
+        }
+
+        private int NewOffset(int width)
+        {
+            var newOffset = _offset + width;
+            var prevSize = _size;
+            while (_size < newOffset)
+            {
+                _size <<= 1;
+            }
+
+            if (prevSize < _size)
+            {
+                var prevBytes = _bytes;
+                _bytes = new byte[_size];
+                Buffer.BlockCopy(prevBytes, 0, _bytes, 0, _offset);
+            }
+
+            return newOffset;
+        }
+
+        internal int StartVector()
+        {
+            return _stack.Count;
+        }
+
+        internal int EndVector(int start, bool typed, bool fix)
+        {
+            var vecLen = _stack.Count - start;
+            var vec = CreateVector(start, vecLen, 1, typed, fix);
+            
+            _stack.RemoveRange(_stack.Count - vecLen, vecLen);
+            _stack.Add(vec);
+            return (int)vec.AsLong;
+        }
+
+        private StackValue CreateVector(int start, int vecLen, int step, bool typed, bool fix, StackValue? keys = null)
+        {
+            var bitWidth = BitWidthUtil.Width(vecLen);
+            var prefixElems = 1;
+            if (keys != null)
+            {
+                var elemWidth = keys.Value.ElementWidth(_offset, 0);
+                if ((int) elemWidth > (int) bitWidth)
+                {
+                    bitWidth = elemWidth;
+                }
+
+                prefixElems += 2;
+            }
+
+            var vectorType = Type.Key;
+            for (var i = start; i < _stack.Count; i+=step)
+            {
+                var elemWidth = _stack[i].ElementWidth(_offset, i + prefixElems);
+                if ((int) elemWidth > (int) bitWidth)
+                {
+                    bitWidth = elemWidth;
+                }
+
+                if (typed)
+                {
+                    if (i == start)
+                    {
+                        vectorType = _stack[i].TypeOfValue;
+                    }
+                    else
+                    {
+                        if (vectorType != _stack[i].TypeOfValue)
+                        {
+                            throw new Exception($"Your typed vector is of type {vectorType} but the item on index {i} is of type {_stack[i].TypeOfValue}");
+                        }
+                    }
+                }
+            }
+
+            if (TypesUtil.IsTypedVectorElement(vectorType) == false)
+            {
+                throw new Exception("Your fixed types are not one of: Int / UInt / Float / Key");
+            }
+
+            var byteWidth = Align(bitWidth);
+            if (keys != null)
+            {
+                Write(keys.Value, byteWidth);
+                Write(1 << (int)keys.Value.InternalWidth, byteWidth);
+            }
+
+            if (!fix)
+            {
+                Write(vecLen, byteWidth);
+            }
+
+            var vloc = _offset;
+
+            for (var i = start; i < _stack.Count; i += step)
+            {
+                Write(_stack[i], byteWidth);
+            }
+
+            if (!typed)
+            {
+                for (var i = start; i < _stack.Count; i += step)
+                {
+                    Write(_stack[i].StoredPackedType());
+                }
+            }
+
+            
+            if (keys != null)
+            {
+                return StackValue.Value(vloc, bitWidth, Type.Map);
+            }
+
+            if (typed)
+            {
+                var type = TypesUtil.ToTypedVector(vectorType, (byte)(fix ? vecLen : 0));
+                return StackValue.Value(vloc, bitWidth, type);
+            }
+            
+            return StackValue.Value(vloc, bitWidth, Type.Vector);
+        }
+    }
+
+    internal class OffsetArrayComparer : IEqualityComparer<long[]>
+    {
+        public bool Equals(long[] x, long[] y)
+        {
+            if (x.Length != y.Length)
+            {
+                return false;
+            }
+            for (var i = 0; i < x.Length; i++)
+            {
+                if (x[i] != y[i])
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        public int GetHashCode(long[] obj)
+        {
+            var result = 17;
+            for (var i = 0; i < obj.Length; i++)
+            {
+                unchecked
+                {
+                    result = (int) (result * 23 + obj[i]);
+                }
+            }
+            return result;
+        }
+    }
+}

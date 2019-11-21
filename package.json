@@ -1,0 +1,15 @@
+{
+  "name": "com.mzaks.flexbuffers",
+  "version": "0.1.0",
+  "displayName": "FlexBuffers Support",
+  "description": "This package brings FlexBuffers support to your Unity project",
+  "keywords": [
+    "FlexBuffer",
+    "binary"
+  ],
+  "author": {
+    "name": "Maxim Zaks",
+    "email": "maxim.zaks@gmail.com",
+    "url": "https://github.com/mzaks/FlexBuffersUnity"
+  }
+}
