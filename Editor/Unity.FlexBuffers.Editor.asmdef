@@ -1,7 +1,11 @@
 {
     "name": "FlexBuffersEditor",
-    "references": [],
-    "includePlatforms": [],
+    "references": [
+        "GUID:1a82e366e6a014b228ca1f953480ed08"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
     "excludePlatforms": [],
     "allowUnsafeCode": false,
     "overrideReferences": false,

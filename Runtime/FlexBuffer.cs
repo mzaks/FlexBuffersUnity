@@ -339,7 +339,7 @@ namespace FlexBuffers
             var start = StartVector();
             var typed = true;
             var prevType = -1;
-            foreach (dynamic value in values)
+            foreach (object value in values)
             {
                 var currentType = this.AddDynamic(value);
 
@@ -496,7 +496,7 @@ namespace FlexBuffers
             return false;
         }
 
-        private Type AddDynamic(dynamic value)
+        private Type AddDynamic(object value)
         {
             switch (value)
             {

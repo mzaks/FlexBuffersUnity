@@ -4,6 +4,7 @@ using FlexBuffers;
 using UnityEditor;
 using UnityEditor.IMGUI.Controls;
 using UnityEngine;
+using FlexBuffers;
 
 public class FlexBufferTreeWindow : EditorWindow
 {
@@ -58,7 +59,7 @@ public class FlexBufferTreeWindow : EditorWindow
         _treeView?.OnGUI(new Rect(0, 80, position.width, position.height - 80));
     }
     
-    [MenuItem("Assets/FlexBuffer Browser")]
+    [MenuItem("Tools/FlexBuffers/FlexBuffer Browser")]
     static void ShowWidnow()
     {
         var window = GetWindow<FlexBufferTreeWindow> ();

@@ -1,11 +1,10 @@
 ﻿using System.IO;
 using FlexBuffers;
 using UnityEditor;
-using UnityEngine;
 
 public static class ImportAsFlexBuffer
 {
-    [MenuItem("Assets/JSON as FlexBuffer...")]
+    [MenuItem("Tools/FlexBuffers/JSON as FlexBuffer...")]
     static void ImportJson()
     {
         string jsonPath = EditorUtility.OpenFilePanel("Select JSON file", "", "json");
@@ -34,7 +33,7 @@ public static class ImportAsFlexBuffer
         }
     }
     
-    [MenuItem("Assets/CSV as FlexBuffer...")]
+    [MenuItem("Tools/FlexBuffers/CSV as FlexBuffer...")]
     static void ImportCsv()
     {
         string csvPath = EditorUtility.OpenFilePanel("Select CSV file", "", "csv");
@@ -65,7 +64,7 @@ public static class ImportAsFlexBuffer
         }
     }
     
-    [MenuItem("Assets/XML as FlexBuffer...")]
+    [MenuItem("Tools/FlexBuffers/XML as FlexBuffer...")]
     static void ImportXML()
     {
         string xmlPath = EditorUtility.OpenFilePanel("Select XML file", "", "xml");
