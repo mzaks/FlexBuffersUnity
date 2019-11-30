@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using FlexBuffers;
 using UnityEditor;
 using UnityEditor.IMGUI.Controls;
@@ -12,6 +13,9 @@ public class FlexBufferTreeWindow : EditorWindow
 
     private FlexBufferTreeView _treeView;
     private string _path = "";
+    private int _fileSize;
+    private string _jsonPath = "";
+    private int _jsonFileSize;
     private string _query = "";
     
     void OnEnable ()
@@ -20,6 +24,10 @@ public class FlexBufferTreeWindow : EditorWindow
         // that survived assembly reloading)
         if (_treeViewState == null)
             _treeViewState = new TreeViewState ();
+        _path = "";
+        _jsonPath = "";
+        _query = "";
+        _fileSize = 0;
     }
     
     void OnGUI ()
@@ -33,8 +41,12 @@ public class FlexBufferTreeWindow : EditorWindow
             }
 
             _path = jsonPath;
+
+            _query = "";
             
             var bytes = File.ReadAllBytes(_path);
+
+            _fileSize = bytes.Length;
 
             var root = FlxValue.FromBytes(bytes);
             _treeView = new FlexBufferTreeView(root, _treeViewState);
@@ -45,8 +57,56 @@ public class FlexBufferTreeWindow : EditorWindow
         {
             return;
         }
+
+        var jsonFileString = _jsonPath.Length > 0 ? $"| {_jsonPath} [{_jsonFileSize}]" : "";
+        GUILayout.Label($"{_path} [{_fileSize}] {jsonFileString}");
+
+        if (_jsonPath.Length > 0)
+        {
+            GUILayout.BeginHorizontal();
+        }
+
+        if (GUILayout.Button("Export as JSON..."))
+        {
+            var jsonPath = EditorUtility.SaveFilePanel(
+                "Save as JSON",
+                "",
+                $"{Path.GetFileNameWithoutExtension(_path)}.json",
+                "json");
+
+            if (jsonPath.Length != 0)
+            {
+                var prettyJson = FlexBuffersPreferences.PrettyPrintedJson ? _treeView._rootValue.ToPrettyJson() : _treeView._rootValue.ToJson;
+                _jsonFileSize = prettyJson.Length;
+                File.WriteAllText(jsonPath, prettyJson);
+            }
+
+            _jsonPath = jsonPath;
+        }
+
+        if (_jsonPath.Length > 0)
+        {
+            if (GUILayout.Button("Open JSON"))
+            {
+                Application.OpenURL($"file://{_jsonPath}");
+            }
+            
+            if (GUILayout.Button("Import from JSON"))
+            {
+                var bytes = JsonToFlexBufferConverter.ConvertFile(_jsonPath);
+
+                if (bytes != null)
+                {
+                    File.WriteAllBytes(_path, bytes);
+                }
+
+                var root = FlxValue.FromBytes(bytes);
+                _treeView = new FlexBufferTreeView(root, _treeViewState);
+                _treeViewState = new TreeViewState ();
+            }
+            GUILayout.EndHorizontal();
+        }
         
-        GUILayout.Label(_path);
         var newQuery = GUILayout.TextField(_query);
 
         if (newQuery != _query)
@@ -57,10 +117,28 @@ public class FlexBufferTreeWindow : EditorWindow
         }
 
         _treeView?.OnGUI(new Rect(0, 80, position.width, position.height - 80));
+
+
+        if (Event.current.type == EventType.KeyUp && (Event.current.modifiers == EventModifiers.Control ||
+                                                      Event.current.modifiers == EventModifiers.Command))
+        {
+            if (Event.current.keyCode == KeyCode.C)
+            {
+                Event.current.Use();
+                var selection = _treeView?.GetSelection();
+                if (selection != null && selection.Count > 0)
+                {
+                    if (_treeView.GetRows().First(item => item.id == selection[0]) is FlxValueTreeViewItem row)
+                    {
+                        GUIUtility.systemCopyBuffer = row.FlxValue.ToJson;
+                    }
+                }
+            }
+        }
     }
     
     [MenuItem("Tools/FlexBuffers/FlexBuffer Browser")]
-    static void ShowWidnow()
+    private static void ShowWidow()
     {
         var window = GetWindow<FlexBufferTreeWindow> ();
         window.titleContent = new GUIContent ("FlexBuffer Browser");
@@ -70,7 +148,7 @@ public class FlexBufferTreeWindow : EditorWindow
 
 public class FlexBufferTreeView : TreeView
 {
-    private readonly FlxValue _rootValue;
+    internal readonly FlxValue _rootValue;
     private FlxQuery _query;
 
     internal void SetQuery(FlxQuery query)
@@ -92,11 +170,13 @@ public class FlexBufferTreeView : TreeView
         _rootValue = rootValue;
         Reload();
     }
+    
+    
 }
 
 public class FlxValueTreeViewItem : TreeViewItem
 {
-    private FlxValue _flxValue;
+    public readonly FlxValue FlxValue;
     private int _depth;
     private FlxValueTreeViewItem _parent;
     private string _key;
@@ -105,76 +185,76 @@ public class FlxValueTreeViewItem : TreeViewItem
 
     public FlxValueTreeViewItem(FlxValue value, int depth = 0, FlxValueTreeViewItem parent = null, string key = "", FlxQuery query = null)
     {
-        _flxValue = value;
+        FlxValue = value;
         _depth = depth;
         _parent = parent;
         _key = key;
         _query = query;
     }
     
-    public override int id => _flxValue.BufferOffset;
+    public override int id => FlxValue.BufferOffset;
     public override string displayName {
         get
         {
-            var type = _flxValue.ValueType;
+            var type = FlxValue.ValueType;
             if (TypesUtil.IsAVector(type))
             {
-                return $"{_key}{type}[{_flxValue.AsVector.Length}]";
+                return $"{_key}{type}[{FlxValue.AsVector.Length}]";
             }
 
             if (type == Type.Map)
             {
-                return $"{_key}{type}[{_flxValue.AsMap.Length}]";
+                return $"{_key}{type}[{FlxValue.AsMap.Length}]";
             }
 
-            if (_flxValue.IsNull)
+            if (FlxValue.IsNull)
             {
                 return $"{_key}null";
             }
 
             if (type == Type.Bool)
             {
-                return $"{_key}{_flxValue.AsBool}";
+                return $"{_key}{FlxValue.AsBool}";
             }
 
             if (type == Type.Blob)
             {
-                return $"{_key}{_flxValue.ToJson}";
+                return $"{_key}{FlxValue.ToJson}";
             }
 
             if (type == Type.Float || type == Type.IndirectFloat)
             {
-                return $"{_key}{_flxValue.AsDouble}";
+                return $"{_key}{FlxValue.AsDouble}";
             }
 
             if (type == Type.Int || type == Type.IndirectInt)
             {
-                return $"{_key}{_flxValue.AsLong}";
+                return $"{_key}{FlxValue.AsLong}";
             }
 
             if (type == Type.Uint || type == Type.IndirectUInt)
             {
-                return $"{_key}{_flxValue.AsULong}";
+                return $"{_key}{FlxValue.AsULong}";
             }
 
             if (type == Type.String)
             {
-                return $"{_key}'{_flxValue.AsString}'";
+                return $"{_key}'{FlxValue.AsString}'";
             }
 
             return "UNKNOWN";
         }
     }
     public override int depth => _depth;
-    public override bool hasChildren => TypesUtil.IsAVector(_flxValue.ValueType) || _flxValue.ValueType == Type.Map;
+    public override bool hasChildren => TypesUtil.IsAVector(FlxValue.ValueType) || FlxValue.ValueType == Type.Map;
 
     public override List<TreeViewItem> children
     {
         get
         {
-            if (TypesUtil.IsAVector(_flxValue.ValueType))
+            if (TypesUtil.IsAVector(FlxValue.ValueType))
             {
-                var vec = _flxValue.AsVector;
+                var vec = FlxValue.AsVector;
                 if (_children == null)
                 {
                     _children = new List<TreeViewItem>(vec.Length);
@@ -204,9 +284,9 @@ public class FlxValueTreeViewItem : TreeViewItem
                 return _children;
             }
 
-            if (_flxValue.ValueType == Type.Map)
+            if (FlxValue.ValueType == Type.Map)
             {
-                var map = _flxValue.AsMap;
+                var map = FlxValue.AsMap;
                 if (_children == null)
                 {
                     _children = new List<TreeViewItem>(map.Length);

@@ -43,7 +43,7 @@ public static class ImportAsFlexBuffer
         }
 
         var csv = File.ReadAllText(csvPath);
-        var bytes = CsvToFlexBufferConverter.Convert(csv);
+        var bytes = CsvToFlexBufferConverter.Convert(csv, FlexBuffersPreferences.CsvSeparator);
 
         if (bytes == null)
         {

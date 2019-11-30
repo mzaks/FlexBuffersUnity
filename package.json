@@ -1,6 +1,6 @@
 {
   "name": "com.mzaks.flexbuffers",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "displayName": "FlexBuffers Support",
   "description": "This package brings FlexBuffers support to your Unity project",
   "keywords": [
