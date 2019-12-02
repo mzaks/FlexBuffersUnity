@@ -321,6 +321,25 @@ namespace FlexBuffers
             }
         }
 
+        public string ToPrettyJson(string left = "", bool childrenOnly = false)
+        {
+            if (_type == Type.Map)
+            {
+                return AsMap.ToPrettyJson(left, childrenOnly);
+            }
+            if (TypesUtil.IsAVector(_type))
+            {
+                return AsVector.ToPrettyJson(left, childrenOnly);
+            }
+
+            if (childrenOnly)
+            {
+                return ToJson;
+            }
+            
+            return $"{left}{ToJson}";
+        }
+
         internal static long ReadLong(byte[] bytes, int offset, byte width)
         {
             if (offset < 0 || bytes.Length <= (offset + width) || (offset & (width - 1)) != 0)
@@ -474,6 +493,31 @@ namespace FlexBuffers
                 return builder.ToString();
             }
         }
+
+        public string ToPrettyJson(string left = "", bool childrenOnly = false)
+        {
+            var builder = new StringBuilder();
+            if (childrenOnly == false)
+            {
+                builder.Append(left);    
+            }
+            
+            builder.Append("[\n");
+            for (var i = 0; i < _length; i++)
+            {
+                builder.Append(this[i].ToPrettyJson($"{left}  "));
+                if (i < _length - 1)
+                {
+                    builder.Append(",");
+                }
+
+                builder.Append("\n");
+            }
+            builder.Append(left);
+            builder.Append("]");
+
+            return builder.ToString();
+        }
         
         public IEnumerator<FlxValue> GetEnumerator()
         {
@@ -561,6 +605,31 @@ namespace FlexBuffers
                 builder.Append("}");
                 return builder.ToString();
             }
+        }
+
+        public string ToPrettyJson(string left = "", bool childrenOnly = false)
+        {
+            var builder = new StringBuilder();
+            if (childrenOnly == false)
+            {
+                builder.Append(left);    
+            }
+            builder.Append("{\n");
+            var keys = Keys;
+            var values = Values;
+            for (var i = 0; i < _length; i++)
+            {
+                builder.Append($"{left}  {keys[i].ToPrettyJson()} : {values[i].ToPrettyJson($"{left}  ", true)}");
+                if (i < _length - 1)
+                {
+                    builder.Append(",");
+                }
+
+                builder.Append("\n");
+            }
+            builder.Append(left);
+            builder.Append("}");
+            return builder.ToString();
         }
 
         public int KeyIndex(string key)
