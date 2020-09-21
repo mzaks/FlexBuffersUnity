@@ -16,20 +16,20 @@ namespace FlexBuffers
             ShareKeyVectors = 1 << 2,
         } 
         private readonly List<StackValue> _stack = new List<StackValue>();
-        private readonly Dictionary<string, int> _stringCache = new Dictionary<string, int>();
-        private readonly Dictionary<string, int> _keyCache = new Dictionary<string, int>();
+        private readonly Dictionary<string, ulong> _stringCache = new Dictionary<string, ulong>();
+        private readonly Dictionary<string, ulong> _keyCache = new Dictionary<string, ulong>();
         private readonly Dictionary<long[], StackValue> _keyVectorCache = new Dictionary<long[], StackValue>(new OffsetArrayComparer());
         private byte[] _bytes;
-        private int _size = 2048;
-        private int _offset;
+        private ulong _size = 2048;
+        private ulong _offset;
         private readonly Options _options;
         private bool _finished = false;
 
-        public FlexBuffer(int size = 2048, Options options = Options.ShareKeys | Options.ShareStrings | Options.ShareKeyVectors)
+        public FlexBuffer(ulong size = 2048, Options options = Options.ShareKeys | Options.ShareStrings | Options.ShareKeyVectors)
         {
             if (size > 0)
             {
-                this._size = size;
+                _size = size;
             }
             _bytes = new byte[size];
             _offset = 0;
@@ -73,7 +73,7 @@ namespace FlexBuffers
         
         public static byte[] SingleValue(string value)
         {
-            var buffer = new FlexBuffer(value.Length + 2);
+            var buffer = new FlexBuffer((ulong)value.Length + 2);
             buffer.Add(value);
             return buffer.Finish();
         }
@@ -179,7 +179,7 @@ namespace FlexBuffers
         
         public static byte[] SingleValue(byte[] blob)
         {
-            var buffer = new FlexBuffer(blob.Length + 10);
+            var buffer = new FlexBuffer((ulong)blob.Length + 10);
             buffer.Add(blob);
             return buffer.Finish();
         }
@@ -206,7 +206,7 @@ namespace FlexBuffers
                 FinishBuffer();
             }
             var result = new byte[_offset];
-            Buffer.BlockCopy(_bytes, 0, result, 0, _offset);
+            Buffer.BlockCopy(_bytes, 0, result, 0, (int) _offset);
             return result;
         }
 
@@ -299,7 +299,7 @@ namespace FlexBuffers
         {
             
             var bytes = Encoding.UTF8.GetBytes(value);
-            var length = bytes.Length;
+            var length = (ulong)bytes.Length;
             var bitWidth = BitWidthUtil.Width(length);
             if (_options.HasFlag(Options.ShareStrings) && _stringCache.ContainsKey(value))
             {
@@ -310,7 +310,7 @@ namespace FlexBuffers
             Write(length, byteWidth);
             var stringOffset = _offset;
             var newOffset = NewOffset(length + 1);
-            Buffer.BlockCopy(bytes, 0, _bytes, _offset, length);
+            Buffer.BlockCopy(bytes, 0, _bytes, (int)_offset, (int)length);
             _offset = newOffset;
             _stack.Add(StackValue.Value(stringOffset, bitWidth, Type.String));
             if (_options.HasFlag(Options.ShareStrings))
@@ -322,13 +322,14 @@ namespace FlexBuffers
         
         internal Type Add(byte[] value)
         {
-            var bitWidth = BitWidthUtil.Width(value.Length);
+            var length = (ulong)value.Length;
+            var bitWidth = BitWidthUtil.Width(length);
             var byteWidth = Align(bitWidth);
             Write(value.Length, byteWidth);
             
-            var newOffset = NewOffset(value.Length);
+            var newOffset = NewOffset(length);
             var blobOffset = _offset;
-            Buffer.BlockCopy(value, 0, _bytes, _offset, value.Length);
+            Buffer.BlockCopy(value, 0, _bytes, (int)_offset, value.Length);
             _offset = newOffset;
             _stack.Add(StackValue.Value(blobOffset, bitWidth, Type.Blob));
             return Type.Blob;
@@ -341,7 +342,7 @@ namespace FlexBuffers
             var prevType = -1;
             foreach (object value in values)
             {
-                var currentType = this.AddDynamic(value);
+                var currentType = AddDynamic(value);
 
                 if (typed == false || TypesUtil.IsTypedVectorElement(currentType) == false)
                 {
@@ -543,10 +544,10 @@ namespace FlexBuffers
                 return;
             }
             var bytes = Encoding.UTF8.GetBytes(value);
-            var length = bytes.Length;
+            var length = (ulong)bytes.Length;
             var keyOffset = _offset;
             var newOffset = NewOffset(length + 1);
-            Buffer.BlockCopy(bytes, 0, _bytes, _offset, length);
+            Buffer.BlockCopy(bytes, 0, _bytes, (int)_offset, (int)length);
             _offset = newOffset;
             _stack.Add(StackValue.Value(keyOffset, BitWidth.Width8, Type.Key));
             if (_options.HasFlag(Options.ShareKeys))
@@ -557,18 +558,18 @@ namespace FlexBuffers
 
         private byte Align(BitWidth width)
         {
-            var byteWidth = 1 << (int) width;
+            var byteWidth = 1UL << (int) width;
             _offset += BitWidthUtil.PaddingSize(_offset, byteWidth);
             return (byte) byteWidth;
         }
         
-        private void Write(StackValue value, int width)
+        private void Write(StackValue value, ulong width)
         {
             var newOffset = NewOffset(width);
             if (value.IsOffset)
             {
-                var relOffset = _offset - value.AsLong;
-                if (width == 8 || relOffset < (long)1 << (width * 8))
+                var relOffset = _offset - value.AsULong;
+                if (width == 8 || relOffset < (ulong)1 << ((int)width * 8))
                 {
                     Write(relOffset, width);
                 }
@@ -580,8 +581,8 @@ namespace FlexBuffers
             else
             {
                 var bytes = value.IsFloat32 && width == 4 ? BitConverter.GetBytes((float)value.AsDouble) : BitConverter.GetBytes(value.AsULong);
-                var count = Math.Min(bytes.Length, width); 
-                Buffer.BlockCopy(bytes, 0, _bytes, _offset, count);
+                var count = Math.Min((ulong)bytes.Length, width); 
+                Buffer.BlockCopy(bytes, 0, _bytes, (int)_offset, (int)count);
             }
             _offset = newOffset;
         }
@@ -593,34 +594,34 @@ namespace FlexBuffers
             _offset = newOffset;
         }
         
-        private void Write(long value, int width)
+        private void Write(long value, ulong width)
         {
             var newOffset = NewOffset(width);
             var bytes = BitConverter.GetBytes(value);
-            var count = Math.Min(bytes.Length, width); 
-            Buffer.BlockCopy(bytes, 0, _bytes, _offset, count);
+            var count = Math.Min((ulong)bytes.Length, width); 
+            Buffer.BlockCopy(bytes, 0, _bytes, (int)_offset, (int)count);
             _offset = newOffset;
         }
         
-        private void Write(ulong value, int width)
+        private void Write(ulong value, ulong width)
         {
             var newOffset = NewOffset(width);
             var bytes = BitConverter.GetBytes(value);
-            var count = Math.Min(bytes.Length, width); 
-            Buffer.BlockCopy(bytes, 0, _bytes, _offset, count);
+            var count = Math.Min((ulong)bytes.Length, width); 
+            Buffer.BlockCopy(bytes, 0, _bytes, (int)_offset, (int)count);
             _offset = newOffset;
         }
         
-        private void Write(double value, int width)
+        private void Write(double value, ulong width)
         {
             var newOffset = NewOffset(width);
             var bytes = BitConverter.GetBytes(value);
-            var count = Math.Min(bytes.Length, width); 
-            Buffer.BlockCopy(bytes, 0, _bytes, _offset, count);
+            var count = Math.Min((ulong)bytes.Length, width); 
+            Buffer.BlockCopy(bytes, 0, _bytes, (int)_offset, (int)count);
             _offset = newOffset;
         }
 
-        private int NewOffset(int width)
+        private ulong NewOffset(ulong width)
         {
             var newOffset = _offset + width;
             var prevSize = _size;
@@ -633,7 +634,7 @@ namespace FlexBuffers
             {
                 var prevBytes = _bytes;
                 _bytes = new byte[_size];
-                Buffer.BlockCopy(prevBytes, 0, _bytes, 0, _offset);
+                Buffer.BlockCopy(prevBytes, 0, _bytes, 0, (int)_offset);
             }
 
             return newOffset;

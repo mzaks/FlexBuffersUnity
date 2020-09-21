@@ -111,7 +111,7 @@ namespace FlexBuffers
             return TypesUtil.PackedType(ValueType, StoredWidth(bitWidth));
         }
 
-        public BitWidth ElementWidth(int size, int index)
+        public BitWidth ElementWidth(ulong size, int index)
         {
             if (TypesUtil.IsInline(ValueType))
             {
@@ -120,11 +120,11 @@ namespace FlexBuffers
 
             for (var i = 0; i < 4; i++)
             {
-                var width = 1 << i;
-                var offsetLoc = size + BitWidthUtil.PaddingSize(size, width) + index * width;
-                var offset = offsetLoc - LValue;
+                var width = (ulong)1 << i;
+                var offsetLoc = size + BitWidthUtil.PaddingSize(size, width) + (ulong)index * width;
+                var offset = offsetLoc - UValue;
                 var bitWidth = BitWidthUtil.Width(offset);
-                if ((1 << (byte) bitWidth) == width)
+                if ((1UL << (byte) bitWidth) == width)
                 {
                     return bitWidth;
                 }

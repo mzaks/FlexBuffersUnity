@@ -85,7 +85,7 @@ namespace FlexBuffers
             return ((double)((float)value)) == value ? BitWidth.Width32 : BitWidth.Width64;
         }
 
-        public static int PaddingSize(int bufSize, int scalarSize)
+        public static ulong PaddingSize(ulong bufSize, ulong scalarSize)
         {
             return (~bufSize + 1) & (scalarSize - 1);
         }
