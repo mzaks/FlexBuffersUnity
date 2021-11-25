@@ -378,8 +378,6 @@ namespace FlexBuffers
                     throw new Exception($"Key {key} is not a string.");
                 }
             }
-            
-            keyStrings.Sort();
 
             foreach (var key in keyStrings)
             {
@@ -387,7 +385,7 @@ namespace FlexBuffers
                 AddDynamic(values[key]);
             }
 
-            EndMap(start);
+            SortAndEndMap(start);
         }
 
         internal void SortAndEndMap(int start)
